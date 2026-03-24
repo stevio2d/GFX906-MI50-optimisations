@@ -108,28 +108,41 @@ Or cherry-pick after adding this repo as a remote.
 
 ### Correctness
 
-| Case | Upstream (no fix) | With fix |
-|------|-------------------|----------|
-| row / 512 | 3/3 exact | 3/3 exact |
-| layer / 512 | 3/3 exact | 3/3 exact |
-| row / 64k | 2/3 exact (stochastic) | 3/3 exact |
-| layer / 64k | **0/3 exact (deterministic wrong)** | **3/3 exact** |
+Three states were measured:
+
+| Case | Original upstream (no fix) | fix/39 only (pre-merge) | fix/39 + upstream merged |
+|------|---------------------------|------------------------|--------------------------|
+| row / 512 | 3/3 exact | 3/3 exact | 3/3 exact |
+| layer / 512 | 3/3 exact | 3/3 exact | 3/3 exact |
+| row / 64k | 3/3 exact | 2/3 exact (stochastic) | 3/3 exact |
+| layer / 64k | **0/3 exact (deterministic wrong)** | **3/3 exact** | **3/3 exact** |
+
+- **Original upstream** = clean llama.cpp before any of our work. `layer/64k` was
+  deterministically broken on every single run — always producing the same wrong
+  hash `4b88a9cc...`. This is what this fix targets.
+- **fix/39 only** = our patch applied without pulling upstream changes. `layer/64k`
+  is now correct, but `row/64k` occasionally produced a stochastic wrong hash
+  (`a8f253...`) — a separate latent TP issue that was already there in the original
+  upstream and not caused by our patch.
+- **fix/39 + upstream merged** = our patch forward-ported onto the latest upstream.
+  12/12 exact. The stochastic TP corruption also disappeared, likely fixed by
+  upstream sync changes.
 
 Reference hashes:
 - short (512): `1d89d99ce29434c19dcc563856bd240b50bd7964b094b2e3de089bafd33f603c`
 - long (64k): `473d3c439268c70074d4bc52804395ef64ae276b147678f4b331e69b12316527`
 
-### Throughput (with upstream merged, eval tok/s)
+### Throughput (fix/39 only vs fix/39 + upstream merged, eval tok/s)
 
-| Case | Before merge+fix | After merge+fix | Delta |
-|------|-----------------|-----------------|-------|
+| Case | fix/39 only | fix/39 + upstream | Delta |
+|------|-------------|-------------------|-------|
 | row / 512 | 18.3 | 25.6 | +40% |
 | layer / 512 | 20.7 | 27.6 | +33% |
 | row / 64k | 6.9 | 7.7 | +12% |
 | layer / 64k | 7.3 | 8.0 | +11% |
 
-Note: the throughput gains are primarily from upstream changes merged at the
-same time, not from this fix alone. The fix's contribution is correctness.
+Note: the throughput gains come from upstream changes, not from this fix alone.
+This fix's contribution is correctness — specifically the `layer/64k` case.
 
 ---
 
