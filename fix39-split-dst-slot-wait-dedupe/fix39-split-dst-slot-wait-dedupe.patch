@@ -1,0 +1,66 @@
+From 5966e4ed88fb49ace18ff077d52ade2d247973cc Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 22 Mar 2026 23:17:35 +0000
+Subject: [PATCH] ggml-backend: forward-port split dst slot wait dedupe
+
+---
+ ggml/src/ggml-backend.cpp | 23 +++++++++++++++++------
+ 1 file changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index 22c656996..2276494f7 100644
+--- a/ggml/src/ggml-backend.cpp
++++ b/ggml/src/ggml-backend.cpp
+@@ -1454,6 +1454,14 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+         struct ggml_backend_sched_split * split = &splits[split_id];
+         int split_backend_id = split->backend_id;
+         ggml_backend_t split_backend = sched->backends[split_backend_id];
++        const bool has_split_event = sched->events[split_backend_id][sched->cur_copy] != NULL;
++        // All inputs in this split target the same destination slot, so one wait/sync is enough.
++        bool split_dst_slot_waited = !has_split_event;
++        bool split_dst_slot_synced = !has_split_event;
++
++        if (!has_split_event) {
++            ggml_backend_synchronize(split_backend);
++        }
+ 
+         // copy the input tensors to the split backend
+         for (int input_id = 0; input_id < split->n_inputs; input_id++) {
+@@ -1463,18 +1471,17 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+ 
+             if (input->flags & GGML_TENSOR_FLAG_INPUT) {
+                 // inputs from the user must be copied immediately to prevent the user overwriting the data before the copy is done
+-                if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
++                if (!split_dst_slot_synced) {
+                     ggml_backend_event_synchronize(sched->events[split_backend_id][sched->cur_copy]);
+-                } else {
+-                    ggml_backend_synchronize(split_backend);
++                    split_dst_slot_waited = true;
++                    split_dst_slot_synced = true;
+                 }
+                 ggml_backend_tensor_copy(input, input_cpy);
+             } else {
+                 // wait for the split backend to finish using the input before overwriting it
+-                if (sched->events[split_backend_id][sched->cur_copy] != NULL) {
++                if (!split_dst_slot_synced && !split_dst_slot_waited) {
+                     ggml_backend_event_wait(split_backend, sched->events[split_backend_id][sched->cur_copy]);
+-                } else {
+-                    ggml_backend_synchronize(split_backend);
++                    split_dst_slot_waited = true;
+                 }
+ 
+                 // when offloading MoE weights, we can reduce the amount of data copied by copying only the experts that are used
+@@ -1578,6 +1585,10 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+             }
+         }
+ 
++        if (!has_split_event) {
++            ggml_backend_synchronize(split_backend);
++        }
++
+         if (!sched->callback_eval) {
+             enum ggml_status ec = ggml_backend_graph_compute_async(split_backend, &split->graph);
+             if (ec != GGML_STATUS_SUCCESS) {
+-- 
+2.43.0
+
