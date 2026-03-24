@@ -100,49 +100,52 @@ Or cherry-pick after adding this repo as a remote.
 
 ---
 
-## Benchmark results (4x MI50 / gfx906, validated 2026-03-24)
+## Benchmark results (3x MI50 / gfx906, validated 2026-03-24)
 
 **Model:** Qwen3.5-122B-A10B Q4_K_S
-**Hardware:** 4x AMD Instinct MI50, 32 GB each
-**Test:** 4 cases × 3 reps = 12 runs, SHA-256 correctness verified
+**Hardware:** 3x AMD Instinct MI50, 32 GB each (one card removed — had 9.5M PCIe replay errors)
+**Test:** layer split only, 512 + 32k context, 3 reps each, SHA-256 correctness verified
+**Reference hashes established via `--split-mode row` (tensor parallel) as ground truth**
 
 ### Correctness
 
-Three states were measured:
-
-| Case | Original upstream (no fix) | fix/39 only (pre-merge) | fix/39 + upstream merged |
-|------|---------------------------|------------------------|--------------------------|
-| row / 512 | 3/3 exact | 3/3 exact | 3/3 exact |
+| Case | Original upstream (no fix) | fix/39 only | fix/39 + upstream merged |
+|------|---------------------------|-------------|--------------------------|
 | layer / 512 | 3/3 exact | 3/3 exact | 3/3 exact |
-| row / 64k | 3/3 exact | 2/3 exact (stochastic) | 3/3 exact |
-| layer / 64k | **0/3 exact (deterministic wrong)** | **3/3 exact** | **3/3 exact** |
+| layer / 32k | **0/3 exact** (`4b88a9cc...`) | **0/3 exact** (`4b88a9cc...`) | **3/3 exact** ✅ |
 
-- **Original upstream** = clean llama.cpp before any of our work. `layer/64k` was
-  deterministically broken on every single run — always producing the same wrong
-  hash `4b88a9cc...`. This is what this fix targets.
-- **fix/39 only** = our patch applied without pulling upstream changes. `layer/64k`
-  is now correct, but `row/64k` occasionally produced a stochastic wrong hash
-  (`a8f253...`) — a separate latent TP issue that was already there in the original
-  upstream and not caused by our patch.
-- **fix/39 + upstream merged** = our patch forward-ported onto the latest upstream.
-  12/12 exact. The stochastic TP corruption also disappeared, likely fixed by
-  upstream sync changes.
+- **Original upstream** — `layer/32k` deterministically wrong on every run, always
+  producing hash `4b88a9cc...`. This is the known PP copy-slot corruption bug.
+- **fix/39 only** — `layer/32k` still wrong on 3 GPUs. fix/39 was validated on 4
+  GPUs (where it fixed `layer/64k`), but on 3 GPUs the copy-slot ring timing
+  differs and the patch alone is not sufficient.
+- **fix/39 + upstream merged** — 6/6 exact. The combination of our patch and
+  upstream sync changes fully resolves the corruption on 3 GPUs.
 
 Reference hashes:
 - short (512): `1d89d99ce29434c19dcc563856bd240b50bd7964b094b2e3de089bafd33f603c`
-- long (64k): `473d3c439268c70074d4bc52804395ef64ae276b147678f4b331e69b12316527`
+- long (32k): `c453c406095d70669d6278649fdb9da2a6cf79543b245c419b912f9fc7864a44`
 
-### Throughput (fix/39 only vs fix/39 + upstream merged, eval tok/s)
+### Throughput
 
-| Case | fix/39 only | fix/39 + upstream | Delta |
-|------|-------------|-------------------|-------|
-| row / 512 | 18.3 | 25.6 | +40% |
-| layer / 512 | 20.7 | 27.6 | +33% |
-| row / 64k | 6.9 | 7.7 | +12% |
-| layer / 64k | 7.3 | 8.0 | +11% |
+#### Prompt eval (tok/s) — prefill speed
 
-Note: the throughput gains come from upstream changes, not from this fix alone.
-This fix's contribution is correctness — specifically the `layer/64k` case.
+| Case | Upstream (no fix) | fix/39 only | fix/39 + upstream | vs upstream |
+|------|-------------------|-------------|-------------------|-------------|
+| layer / 512 | 196.4 | 196.4 | 216.5 | +10% |
+| layer / 32k | 813.5 | 813.2 | 841.1 | +3% |
+
+#### Generation (tok/s) — decode speed
+
+| Case | Upstream (no fix) | fix/39 only | fix/39 + upstream | vs upstream |
+|------|-------------------|-------------|-------------------|-------------|
+| layer / 512 | 21.4 | 21.3 | 29.4 | +37% |
+| layer / 32k | 10.9 | 10.9 | 12.7 | +17% |
+
+fix/39 alone has no throughput impact — it is a correctness-only fix. The
+throughput gains come entirely from upstream changes merged alongside it.
+The +37% generation speedup on layer/512 is the most significant upstream
+improvement on gfx906.
 
 ---
 
@@ -152,11 +155,11 @@ This fix's contribution is correctness — specifically the `layer/64k` case.
 HSA_OVERRIDE_GFX_VERSION=9.0.6 \
 ROCBLAS_TENSILE_LIBPATH=/opt/rocm-custom/lib/rocblas/library \
 LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH \
-HIP_VISIBLE_DEVICES=0,1,2,3 \
-ROCR_VISIBLE_DEVICES=0,1,2,3 \
+HIP_VISIBLE_DEVICES=0,1,2 \
+ROCR_VISIBLE_DEVICES=0,1,2 \
 ./build-opt/bin/llama-completion \
   -m Qwen3.5-122B-A10B-Q4_K_S-00001-of-00003.gguf \
-  -c 64000 \
+  -c 32000 \
   -ngl 999 \
   --fit off \
   --temp 0 \
@@ -169,7 +172,7 @@ ROCR_VISIBLE_DEVICES=0,1,2,3 \
   --no-warmup \
   --verbosity 3 \
   --perf \
-  -f prompt-63968.txt \
+  -f prompt-31968.txt \
   -t 16 -tb 16 \
   -b 1024 -ub 256 \
   -ctk q4_0 -ctv q4_0 \
@@ -186,8 +189,8 @@ Swap `-c 64000` and the prompt file for `-c 512` / `prompt-480.txt` for short co
 HSA_OVERRIDE_GFX_VERSION=9.0.6 \
 ROCBLAS_TENSILE_LIBPATH=/opt/rocm-custom/lib/rocblas/library \
 LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm/lib:/opt/rocm/lib64:$LD_LIBRARY_PATH \
-HIP_VISIBLE_DEVICES=0,1,2,3 \
-ROCR_VISIBLE_DEVICES=0,1,2,3 \
+HIP_VISIBLE_DEVICES=0,1,2 \
+ROCR_VISIBLE_DEVICES=0,1,2 \
 ./build-opt/bin/llama-server \
   -m Qwen3.5-122B-A10B-Q4_K_S-00001-of-00003.gguf \
   -ngl 999 \

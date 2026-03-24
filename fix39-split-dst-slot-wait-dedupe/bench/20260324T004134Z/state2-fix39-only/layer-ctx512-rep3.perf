@@ -1,0 +1,4 @@
+common_perf_print:        load time =    2877.41 ms
+common_perf_print: prompt eval time =    2876.08 ms /   479 tokens (    6.00 ms per token,   166.55 tokens per second)
+common_perf_print:        eval time =    1504.83 ms /    31 runs   (   48.54 ms per token,    20.60 tokens per second)
+common_perf_print:       total time =    4394.91 ms /   510 tokens
