@@ -181,6 +181,17 @@ llama_memory_breakdown_print: |   - ROCm1 (MI50/MI60)  | 32752 =  9940 + (22557 
 llama_memory_breakdown_print: |   - ROCm2 (MI50/MI60)  | 32752 = 10364 + (22134 = 21532 +      65 +     537) +         253 |
 ```
 
+## Reference KV Cache Comparison
+
+From the original cold no-cache server comparison for this dispatch change:
+
+| Case | KV cache |
+|------|----------|
+| `f16/f16 + flash-attn` | `2000.00 MiB` |
+| `tq3_0/f16 + flash-attn` | `1218.75 MiB` |
+
+Net reduction: `781.25 MiB` (`-39.1%`)
+
 ## Notes
 
 - The 122B run above was a load-and-run sanity check, not a benchmark-grade comparison.

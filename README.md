@@ -34,6 +34,8 @@ Interpretation:
 - the long-prefill problem is effectively solved
 - long prefill is now within about 1% of the `f16/f16` FlashAttention baseline
 - decode remains slightly lower than `f16`, but still close
+- KV cache from the cold no-cache server comparison dropped from `2000.00 MiB`
+  to `1218.75 MiB`, a savings of `781.25 MiB` (`-39.1%`)
 - this makes the dispatch split more promising than older gfx906-specific
   FlashAttention tuning patches that regressed prefill
 
