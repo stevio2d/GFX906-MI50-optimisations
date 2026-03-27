@@ -63,6 +63,7 @@ Exact commands, environment, and proof excerpts are in
 | [fix39-split-dst-slot-wait-dedupe](fix39-split-dst-slot-wait-dedupe/) | Fixes deterministic wrong output at 64k context under pipeline-parallel (--split-mode layer) by deduplicating destination slot wait/sync per split | Validated 4x MI50 |
 | [fix32-fattn-tile-config](fix32-fattn-tile-config/) | Lowers thread count for Flash Attention tile configuration case (256, 256, 32) from 256 down to 128 in `fattn-tile.cuh` | **Regression** (verified slower than upstream) |
 | [fix51-stream-k-mmq-gcn](fix51-stream-k-mmq-gcn/) | Enables Stream-K work partitioning for GCN GPUs. | **Regression** for large prompt processing batches. |
+| See for Turboquant ROCM branche working on MI 50 but maybe other ROCM as well: https://github.com/stevio2d/llama.cpp-gfx906/tree/tq3_0-mi50-slim-pr |
 
 ## Hardware
 
